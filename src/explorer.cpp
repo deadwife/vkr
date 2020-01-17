@@ -9,26 +9,38 @@ Explorer::Explorer(size_t n, size_t k) :
     linear_function_count(uword(pow(k, n + 1))),
     number_of_sets(uword(pow(k, n))),
     Lcoins(linear_function_count),
+    time_taken(0.0),
     result(number_of_sets),
-    isBad(number_of_sets, false),
     badMat(number_of_sets, bvec(number_of_sets, false)),
     badCube(number_of_sets, bmat(number_of_sets, bvec(number_of_sets, false))),
     cur_sets(0),
-    L(initL())
+    L(initL()) 
 {
-    for(size_t i = 0; i < number_of_sets; ++i) {
-        uvec t = toKary(i, n, nullptr);
-        isBad[i] = (t % 2).max() == 0;
-    }
-    for(size_t i = 0; i < number_of_sets; ++i) {
+    // true ~ linear dependency
+    for (size_t i = 0; i < number_of_sets; ++i)
         for (size_t j = 0; j < number_of_sets; ++j) {
-            badMat[i][j] = isBad[i] && isBad[j];
+            bool stop = false;
+            uvec iset, jset;
+            for(size_t a = 1; a < k; ++a) {
+                for(size_t b = 1; b < k; ++b) {
+                    iset = toKary(i, n + 1, nullptr);
+                    jset = toKary(j, n + 1, nullptr);
+                    iset[n] = 1; jset[n] = 1;
+                    uvec setsum = (a * iset + b * jset) % k; // num * set?
+                    if(setsum.max() == 0) {
+                        // above means linear dependency
+                        badMat[i][j] = true;
+                        stop = true;
+                        break;
+                    }
+                }
+                if(stop) break;
+            }
         }
-    }
-    for(size_t i = 0; i < number_of_sets; ++i) {
-        // cout << " i: " << i;
-        for(size_t j = 0; j < number_of_sets; ++j) {
-            // cout << "\nj: " << j;
+
+    // true ~ linear dependency
+    for(size_t i = 0; i < number_of_sets; ++i)
+        for(size_t j = 0; j < number_of_sets; ++j)
             for(size_t s = 0; s < number_of_sets; ++s) {
                 bool stop = false;
                 uvec iset, jset, sset;
@@ -44,19 +56,25 @@ Explorer::Explorer(size_t n, size_t k) :
                                 // above means linear dependency
                                 badCube[i][j][s] = true;
                                 stop = true;
-                                // cout << "\ns: " << s;
-                                // cout << " bad: " << a << "*[" << iset << "] " << b << "*[" << jset << "] " << c << "*[" << sset << "]";
                                 break;
                             }
-                            if(stop) break;
                         }
                         if(stop) break;
                     }
                     if(stop) break;
                 }
             }
-        }
-    }
+    // size_t ss = 0;
+    // uvec inds((size_t)0, 16);
+    // for(size_t i = 0; i < number_of_sets; ++i)
+    //     for(size_t j = i + 1; j < number_of_sets; ++j)
+    //         for(size_t s = j + 1; s < number_of_sets; ++s)
+    //             if(!badCube[i][j][s])
+    //             {
+    //                 ++inds[i]; ++inds[j]; ++inds[s];
+    //                 ss += 1;
+    //             }
+    // cout << ss << endl << inds << endl << flush;
 };
 
 // генератор случайного простого числа на [lower, upper)
@@ -122,7 +140,7 @@ uvec Explorer::toKary(const uword& num, const size_t& count, uvec* const_count) 
 
 // базовый алгоритм поиска универсальной k-значной функции
 bool Explorer::explore(const uword& qstart) {
-    const uword qmax = 1 - qstart;
+    const uword qmax = pow(2, 32) - 1;
     const size_t min_const_count = n + 1;
     const size_t min_coins_count = n + 1;
     clock_t start_time = clock();
@@ -136,11 +154,9 @@ bool Explorer::explore(const uword& qstart) {
         for(uword linf = 0; linf < linear_function_count; ++linf) {
             size_t coins = 0;
             cur_sets.clear();
-            for(uword set = 0; set < number_of_sets; ++set) {
-                if(L[linf][set] == f[set] && lind(set, coins)) {
-                    ++coins;
-                }
-            }
+            for(uword set = 0; set < number_of_sets; ++set)
+                if(L[linf][set] == f[set])
+                    if(lind(set, coins)) ++coins;
             if(coins < min_coins_count) {
                 success = false;
                 break;
@@ -148,7 +164,7 @@ bool Explorer::explore(const uword& qstart) {
         }
         if(success) {
             result = f;
-            time_taken = double(clock() - start_time / CLOCKS_PER_SEC);
+            time_taken = double((clock() - start_time) / CLOCKS_PER_SEC);
             return true;
         }
     }
@@ -157,9 +173,132 @@ bool Explorer::explore(const uword& qstart) {
     return false;
 }
 
+// алгоритм поиска универсальной k-значной функции
+// основан на мутациях
+// можно проверить гипотезу непрерывности на старых работах
+bool Explorer::explore_descent(const uword& qstart, const size_t& threshold) {
+    const uword qmax = pow(2, 32) - 1;
+    const size_t min_const_count = n + 1;
+    const size_t min_coins_count = n + 1;
+    clock_t start_time = clock();
+    uword q = qstart;
+    
+    while(q < qmax) {
+        uvec const_count((size_t)0, k);
+        uvec f = toKary(q, number_of_sets, &const_count);
+        if(const_count.min() < min_const_count) {
+            q += qstart;
+            continue;
+        }
+
+        uvec difference = calc_dif(f);
+        uvec quad = difference * difference;
+        size_t difsum = quad.sum();
+        if(difsum == 0) {
+            result = f;
+            time_taken = double((clock() - start_time) / CLOCKS_PER_SEC);
+            return true;
+        } else if(difsum < threshold) {
+            // возможно, здесь нужно отправлять совсем в другое плавание
+            // можно отправлять в метод, основанный только на мутациях
+            if(mutate(f, difsum))
+            {
+                result = f;
+                time_taken = double((clock() - start_time) / CLOCKS_PER_SEC);
+                return true;
+            }
+        }
+        q += qstart;
+    }
+    time_taken = double((clock() - start_time) / CLOCKS_PER_SEC);
+    cout << time_taken / 60.f << " min" << endl << flush;
+    return false;
+}
+
+// тупо распарралеливание полного перебора
+bool Explorer::explore_parallel(const size_t& child_num) {
+    const uword imax = pow(2, 26);
+    const size_t min_const_count = n + 1;
+    const size_t min_coins_count = n + 1;
+    clock_t start_time = clock();
+    size_t difmin = 17;
+    size_t* difpointer = &difmin;
+
+    pid_t ppid = getpid();
+    pid_t pid = 0;
+    // children setup
+    for(size_t i = 0; i < child_num; ++i) {
+        if(!fork()) {
+            sleep(i + 0.1f);
+            pid = i + 1;
+            break;
+        }
+    }
+    
+    for(uword i = pid; i < imax + 1; i += child_num + 1) {
+        clock_t istart_time = clock();
+        uvec const_count((size_t)0, k);
+        uvec f = toKary(i, number_of_sets, &const_count);
+        if(const_count.min() < min_const_count) continue;
+
+        uvec difference = calc_dif(f);
+        size_t difsum = difference.sum();
+        if(difsum == 0) {
+            result = f;
+            time_taken = double((clock() - start_time) / CLOCKS_PER_SEC);
+            return true;
+        } else if(difsum < *difpointer) {
+            cout << "difmin is now " << difsum << endl << flush;
+            *difpointer = difsum;
+        }
+        // cout << "itertime: " << (clock() - istart_time) / double(CLOCKS_PER_SEC) << endl << flush; ~4*10^-5
+    }
+    if(ppid == getpid()) {
+        for(size_t i = 0; i < child_num; ++i) {
+            cout << "Waiting for child number " << i << "...\n " << flush;
+            wait(nullptr);
+        }
+    } else exit(0);
+    return false;
+}
+
+// in progress...
+// мутации - малое изменение вектора при малой невязке
+// чем меньше невязка, тем больше раз надо пытаться изменить значения
+// что-то вроде (порог - невязка) раз
+// чем больше невязка, тем больше значений мутируют
+//
+// адаптивный спуск - анализ вектора невязки
+bool Explorer::mutate(uvec& func, const size_t& difval) {
+    if(difval == 0) return true;
+    
+    for (uword i = 0; i < number_of_sets; ++i) {
+        for (uword j = i + 1; j < number_of_sets; ++j) {
+            uvec f = func;
+            for (size_t u = 0; u < 3; ++u) {
+                f[i] = (f[i] + 1) % k;
+                for (size_t v = 0; v < 3; ++v) {
+                    f[j] = (f[j] + 1) % k;
+                    uvec quad = calc_dif(f) * calc_dif(f);
+                    size_t s = quad.sum();
+                    if(s < difval) {
+                        cout << s << " is less than " << difval << endl << quad << flush;
+                        if(mutate(f, s)) return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
 // проверка на линейную независимость векторов
 // использует эвристики, свойственные для n=2, k=4
-// нуждается в переделке в общем случае
+// не годится в общем случае
+//
+//
+// попробовать посмотреть для каждой линейной все ее лнз наборы
+// после этого уже искать f
 bool Explorer::lind(const uword& set, const size_t& cur_coins) {
     switch(cur_coins) {
         case 0: {
@@ -196,13 +335,65 @@ void Explorer::collect_info() {
 }
 
 // вывод информации после поиска
-void Explorer::get_info(const uword& q) {
+void Explorer::get_info(const uword& q, ofstream& outfile) {
     collect_info();
     cout << "\nF:\t";
+    outfile << "\nF:\t";
     cout << result << endl << flush;
+    outfile << result << endl << flush;
     cout << "\nq:\t";
+    outfile << "\nq:\t";
     cout << q << endl << flush;
+    outfile << q << endl << flush;
     cout << "\nCoincidences for linear functions:\n";
+    outfile << "\nCoincidences for linear functions:\n";
     cout << Lcoins << endl << flush;
+    outfile << Lcoins << endl << flush;
     cout << "\nTime taken:\t~ " << time_taken << " hours\n" << flush;
+    outfile << "\nTime taken:\t~ " << time_taken << " hours\n" << flush;
+}
+
+// вспомогательная функция-сеттер результата
+void Explorer::t_set_res(const uvec& res) {
+    result = res;
+}
+
+// считает невязку по вектору значений функции f
+uvec Explorer::calc_dif(const uvec& f) {
+    uvec difference(3, linear_function_count);
+    for(uword linf = 0; linf < linear_function_count; ++linf) {
+        size_t coins = 0;
+        cur_sets.clear();
+        for(uword set = 0; set < number_of_sets; ++set) {
+            if(L[linf][set] == f[set]) {
+                if(lind(set, coins)) {
+                    --difference[linf];
+                    ++coins;
+                }
+            }
+        }
+    }
+    return difference;
+}
+
+// считает невязку по вектору значений функции f
+// предъявляет наборы случайно
+uvec Explorer::calc_r_dif(const uvec& f, const uword& step) {
+    uvec difference(3, linear_function_count);
+    for(uword linf = 0; linf < linear_function_count; ++linf) {
+        size_t coins = 0;
+        cur_sets.clear();
+        // случайное предъявление наборов
+        uword rset = rand() % number_of_sets;
+        for(uword set = 0; set < number_of_sets; ++set) {
+            if(L[linf][rset] == f[rset]) {
+                if(lind(rset, coins)) {
+                    --difference[linf];
+                    ++coins;
+                }
+            }
+            rset = (rset + step) % number_of_sets;
+        }
+    }
+    return difference;
 }

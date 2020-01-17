@@ -1,11 +1,17 @@
 #pragma once
 
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <vector>
 #include <valarray>
 #include <unordered_set>
 #include <unistd.h>
-
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <ctime>
+#include <iomanip>
 
 using namespace std;
 
