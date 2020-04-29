@@ -64,17 +64,6 @@ Explorer::Explorer(size_t n, size_t k) :
                     if(stop) break;
                 }
             }
-    // size_t ss = 0;
-    // uvec inds((size_t)0, 16);
-    // for(size_t i = 0; i < number_of_sets; ++i)
-    //     for(size_t j = i + 1; j < number_of_sets; ++j)
-    //         for(size_t s = j + 1; s < number_of_sets; ++s)
-    //             if(!badCube[i][j][s])
-    //             {
-    //                 ++inds[i]; ++inds[j]; ++inds[s];
-    //                 ss += 1;
-    //             }
-    // cout << ss << endl << inds << endl << flush;
 };
 
 // генератор случайного простого числа на [lower, upper)
@@ -175,7 +164,8 @@ bool Explorer::explore(const uword& qstart) {
 
 // алгоритм поиска универсальной k-значной функции
 // основан на мутациях
-// можно проверить гипотезу непрерывности на старых работах
+// не тестировался, не закончен
+// можно проверить гипотезу "непрерывности" на старых работах
 bool Explorer::explore_descent(const uword& qstart, const size_t& threshold) {
     const uword qmax = pow(2, 32) - 1;
     const size_t min_const_count = n + 1;
@@ -215,14 +205,13 @@ bool Explorer::explore_descent(const uword& qstart, const size_t& threshold) {
     return false;
 }
 
-// тупо распарралеливание полного перебора
+// распарралеливание полного перебора
 bool Explorer::explore_parallel(const size_t& child_num) {
     const uword imax = pow(2, 26);
     const size_t min_const_count = n + 1;
     const size_t min_coins_count = n + 1;
     clock_t start_time = clock();
     size_t difmin = 17;
-    size_t* difpointer = &difmin;
 
     pid_t ppid = getpid();
     pid_t pid = 0;
@@ -236,26 +225,25 @@ bool Explorer::explore_parallel(const size_t& child_num) {
     }
     
     for(uword i = pid; i < imax + 1; i += child_num + 1) {
-        clock_t istart_time = clock();
+        // clock_t istart_time = clock();
         uvec const_count((size_t)0, k);
         uvec f = toKary(i, number_of_sets, &const_count);
         if(const_count.min() < min_const_count) continue;
-
         uvec difference = calc_dif(f);
         size_t difsum = difference.sum();
         if(difsum == 0) {
             result = f;
             time_taken = double((clock() - start_time) / CLOCKS_PER_SEC);
             return true;
-        } else if(difsum < *difpointer) {
+        } else if(difsum < difmin) {
             cout << "difmin is now " << difsum << endl << flush;
-            *difpointer = difsum;
+            difmin = difsum;
         }
         // cout << "itertime: " << (clock() - istart_time) / double(CLOCKS_PER_SEC) << endl << flush; ~4*10^-5
     }
     if(ppid == getpid()) {
         for(size_t i = 0; i < child_num; ++i) {
-            cout << "Waiting for child number " << i << "...\n " << flush;
+            cout << "Waiting for child number " << i + 1 << "...\n" << flush;
             wait(nullptr);
         }
     } else exit(0);
@@ -295,10 +283,6 @@ bool Explorer::mutate(uvec& func, const size_t& difval) {
 // проверка на линейную независимость векторов
 // использует эвристики, свойственные для n=2, k=4
 // не годится в общем случае
-//
-//
-// попробовать посмотреть для каждой линейной все ее лнз наборы
-// после этого уже искать f
 bool Explorer::lind(const uword& set, const size_t& cur_coins) {
     switch(cur_coins) {
         case 0: {
@@ -378,6 +362,7 @@ uvec Explorer::calc_dif(const uvec& f) {
 
 // считает невязку по вектору значений функции f
 // предъявляет наборы случайно
+// -> то же самое
 uvec Explorer::calc_r_dif(const uvec& f, const uword& step) {
     uvec difference(3, linear_function_count);
     for(uword linf = 0; linf < linear_function_count; ++linf) {
